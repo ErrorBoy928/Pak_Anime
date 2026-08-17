@@ -1,8 +1,0 @@
-node_modules/
-data/*.sqlite
-data/*.sqlite-*
-uploads/videos/*
-uploads/posters/*
-!uploads/videos/.gitkeep
-!uploads/posters/.gitkeep
-.env
