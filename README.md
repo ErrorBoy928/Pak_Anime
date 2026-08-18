@@ -81,6 +81,21 @@ the trade-off for it being free.
    bucket. Copy the **Access Key ID** (`R2_ACCESS_KEY_ID`) and **Secret
    Access Key** (`R2_SECRET_ACCESS_KEY`) it shows you — the secret is only
    shown once.
+5. Open your bucket → **Settings** → **CORS Policy** → **Add CORS policy**,
+   and paste this in (this is what lets the admin upload page talk to R2
+   directly from the browser — without it, uploads will fail):
+   ```json
+   [
+     {
+       "AllowedOrigins": ["*"],
+       "AllowedMethods": ["PUT"],
+       "AllowedHeaders": ["*"],
+       "MaxAgeSeconds": 3000
+     }
+   ]
+   ```
+   (Once your site is live, you can tighten `AllowedOrigins` to your actual
+   `https://your-app.onrender.com` URL instead of `*` if you'd like.)
 
 ### 3. Push the code to GitHub
 
@@ -130,6 +145,38 @@ data/                local fallback database — only used when DATABASE_URL isn
 - Video streaming supports HTTP range requests, so the player can seek
   without downloading the whole file first — this works the same way
   whether the video lives on R2 or on local disk.
+
+## Large video uploads
+
+The admin upload page doesn't send video files through your Express
+server — it uploads them straight from the browser to R2 (using a
+short-lived signed URL your server hands out first). This matters because
+Render's free-tier proxy — like most free hosts — silently cuts off large
+requests that route through the app itself, typically somewhere in the
+300–450MB range. Sending the file directly to R2 avoids that limit
+entirely; only the small metadata (title, genre, etc.) goes through Render.
+This needs the R2 CORS policy from step 5 above to work. Local development
+(no R2 configured) instead uploads through the server the simple way,
+since there's no such limit on your own machine.
+
+## Series and episodes
+
+Uploading with **"This is an episode of a series/season"** checked (on the
+admin upload page) groups that upload under a series. Type the exact same
+series name for every episode of the same show — matching is by name (not
+case-sensitive), so a typo creates a second, separate series by mistake.
+
+- The library grid shows one card per series (using the first episode's
+  poster/title), not one card per episode — clicking it opens episode 1.
+- A poster only needs to be uploaded once, on the first episode; later
+  episodes without their own poster automatically use the series' poster.
+- On the watch page, opening any episode shows the full episode list for
+  that series underneath the description, each one clickable.
+- Uploads without the series checkbox behave exactly as before — a single
+  standalone entry (for movies, one-offs, etc).
+- The admin panel's "Uploaded titles" list still shows every episode
+  individually (with its series name and episode number), so any single
+  episode can be deleted without affecting the rest of the series.
 
 ## Downloads (in-app, per account)
 

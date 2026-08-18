@@ -24,6 +24,17 @@ async function init() {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS series (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      genre TEXT NOT NULL DEFAULT '',
+      poster_key TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS anime (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -32,10 +43,19 @@ async function init() {
       poster_key TEXT,
       video_key TEXT NOT NULL,
       uploaded_by INTEGER,
+      series_id INTEGER,
+      episode_number INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (uploaded_by) REFERENCES users(id)
+      FOREIGN KEY (uploaded_by) REFERENCES users(id),
+      FOREIGN KEY (series_id) REFERENCES series(id)
     )
   `);
+
+  // Existing deployments already have an `anime` table without these two
+  // columns — add them if missing. Turso/SQLite errors on a duplicate
+  // column, so this is safe to attempt on every boot.
+  await safeAddColumn('anime', 'series_id', 'INTEGER');
+  await safeAddColumn('anime', 'episode_number', 'INTEGER');
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -46,6 +66,14 @@ async function init() {
   `);
 
   await db.execute({ sql: 'DELETE FROM sessions WHERE expires < ?', args: [Date.now()] });
+}
+
+async function safeAddColumn(table, column, type) {
+  try {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  } catch (e) {
+    // Column already exists — fine, nothing to do.
+  }
 }
 
 // Thin convenience wrappers so route code reads like plain SQL calls

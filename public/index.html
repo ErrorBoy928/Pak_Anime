@@ -87,7 +87,7 @@
         <div class="card-poster">${posterMarkup(item)}</div>
         <div class="card-body">
           <div class="card-title">${item.title}</div>
-          <div class="card-genre">${item.genre || 'Anime'}</div>
+          <div class="card-genre">${item.episode_count ? `${item.episode_count} episodes` : (item.genre || 'Anime')}</div>
         </div>
       </a>
     `).join('');

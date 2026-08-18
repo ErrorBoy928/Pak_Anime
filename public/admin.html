@@ -62,7 +62,21 @@
         <form id="upload-form">
           <div class="field">
             <label for="title">Title</label>
-            <input type="text" id="title" required>
+            <input type="text" id="title" required placeholder="e.g. Episode 1, or the movie's title">
+          </div>
+          <div class="field" style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="is-series" style="width:auto;">
+            <label for="is-series" style="margin:0;">This is an episode of a series/season</label>
+          </div>
+          <div id="series-fields" style="display:none;">
+            <div class="field">
+              <label for="series-title">Series name</label>
+              <input type="text" id="series-title" placeholder="e.g. Naruto Season 1 — type the exact same name for every episode">
+            </div>
+            <div class="field">
+              <label for="episode-number">Episode number</label>
+              <input type="number" id="episode-number" min="1" step="1" placeholder="e.g. 1">
+            </div>
           </div>
           <div class="field">
             <label for="genre">Genre</label>
@@ -81,6 +95,7 @@
             <input type="file" id="video" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" required>
           </div>
           <div class="progress-track" id="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+          <div id="progress-label" style="font-size:12px; color:var(--text-muted); margin-top:4px;"></div>
           <button type="submit" class="btn btn-primary btn-block" id="submit-btn" style="margin-top:8px;">Upload</button>
         </form>
       </div>
@@ -92,60 +107,149 @@
     `;
 
     wireUploadForm();
+    wireSeriesToggle();
     loadAdminList();
   }
 
+  function wireSeriesToggle() {
+    const checkbox = document.getElementById('is-series');
+    const fields = document.getElementById('series-fields');
+    checkbox.addEventListener('change', () => {
+      fields.style.display = checkbox.checked ? 'block' : 'none';
+      document.getElementById('series-title').required = checkbox.checked;
+      document.getElementById('episode-number').required = checkbox.checked;
+    });
+  }
+
   function wireUploadForm() {
-    document.getElementById('upload-form').addEventListener('submit', (e) => {
+    document.getElementById('upload-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const errorBox = document.getElementById('form-error');
       errorBox.classList.remove('visible');
 
-      const fd = new FormData();
-      fd.append('title', document.getElementById('title').value.trim());
-      fd.append('genre', document.getElementById('genre').value.trim());
-      fd.append('description', document.getElementById('description').value.trim());
+      const isSeries = document.getElementById('is-series').checked;
+      const seriesTitle = document.getElementById('series-title').value.trim();
+      const episodeNumber = document.getElementById('episode-number').value;
+
+      if (isSeries && (!seriesTitle || !episodeNumber)) {
+        errorBox.textContent = 'Series name and episode number are both required for a series episode.';
+        errorBox.classList.add('visible');
+        return;
+      }
 
       const posterFile = document.getElementById('poster').files[0];
       const videoFile = document.getElementById('video').files[0];
-      if (posterFile) fd.append('poster', posterFile);
       if (!videoFile) {
         errorBox.textContent = 'Choose a video file to upload.';
         errorBox.classList.add('visible');
         return;
       }
-      fd.append('video', videoFile);
+
+      const meta = {
+        title: document.getElementById('title').value.trim(),
+        genre: document.getElementById('genre').value.trim(),
+        description: document.getElementById('description').value.trim(),
+        seriesTitle: isSeries ? seriesTitle : undefined,
+        episodeNumber: isSeries ? episodeNumber : undefined,
+      };
 
       const track = document.getElementById('progress-track');
       const fill = document.getElementById('progress-fill');
+      const label = document.getElementById('progress-label');
       const submitBtn = document.getElementById('submit-btn');
       track.classList.add('visible');
       submitBtn.disabled = true;
 
+      const onProgress = (pct, phase) => {
+        fill.style.width = `${pct}%`;
+        if (label) label.textContent = phase ? `${phase} — ${pct}%` : `${pct}%`;
+      };
+
+      const resetForm = () => {
+        document.getElementById('upload-form').reset();
+        document.getElementById('series-fields').style.display = 'none';
+        fill.style.width = '0%';
+        track.classList.remove('visible');
+        submitBtn.disabled = false;
+      };
+
+      try {
+        const initRes = await api('/anime/upload-init', {
+          method: 'POST',
+          body: JSON.stringify({
+            videoFilename: videoFile.name,
+            videoContentType: videoFile.type,
+            posterFilename: posterFile ? posterFile.name : undefined,
+            posterContentType: posterFile ? posterFile.type : undefined,
+          }),
+        });
+
+        if (initRes.mode === 'presigned') {
+          // Video/poster bytes go straight to R2 — they never pass through
+          // our own server, so hosting limits on request size don't apply.
+          if (posterFile) {
+            await putFileWithProgress(initRes.posterUploadUrl, posterFile, () => {});
+          }
+          await putFileWithProgress(initRes.videoUploadUrl, videoFile, (pct) => onProgress(pct, 'Uploading video'));
+
+          onProgress(100, 'Saving');
+          await api('/anime/upload-complete', {
+            method: 'POST',
+            body: JSON.stringify({
+              ...meta,
+              videoKey: initRes.videoKey,
+              posterKey: initRes.posterKey,
+            }),
+          });
+        } else {
+          // Local dev fallback — no R2 configured, upload straight through
+          // our server the simple way.
+          await directUploadWithProgress(meta, videoFile, posterFile, (pct) => onProgress(pct, 'Uploading'));
+        }
+
+        resetForm();
+        loadAdminList();
+      } catch (err) {
+        submitBtn.disabled = false;
+        track.classList.remove('visible');
+        errorBox.textContent = 'Upload failed. Check the file and try again.';
+        errorBox.classList.add('visible');
+      }
+    });
+  }
+
+  function putFileWithProgress(url, file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url);
+      xhr.setRequestHeader('Content-Type', file.type);
+      xhr.upload.addEventListener('progress', (ev) => {
+        if (ev.lengthComputable) onProgress(Math.round((ev.loaded / ev.total) * 100));
+      });
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error('put_failed')));
+      xhr.onerror = () => reject(new Error('put_failed'));
+      xhr.send(file);
+    });
+  }
+
+  function directUploadWithProgress(meta, videoFile, posterFile, onProgress) {
+    return new Promise((resolve, reject) => {
+      const fd = new FormData();
+      fd.append('title', meta.title);
+      fd.append('genre', meta.genre);
+      fd.append('description', meta.description);
+      if (meta.seriesTitle) fd.append('seriesTitle', meta.seriesTitle);
+      if (meta.episodeNumber) fd.append('episodeNumber', meta.episodeNumber);
+      if (posterFile) fd.append('poster', posterFile);
+      fd.append('video', videoFile);
+
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/anime');
       xhr.upload.addEventListener('progress', (ev) => {
-        if (ev.lengthComputable) {
-          fill.style.width = `${Math.round((ev.loaded / ev.total) * 100)}%`;
-        }
+        if (ev.lengthComputable) onProgress(Math.round((ev.loaded / ev.total) * 100));
       });
-      xhr.onload = () => {
-        submitBtn.disabled = false;
-        if (xhr.status >= 200 && xhr.status < 300) {
-          document.getElementById('upload-form').reset();
-          fill.style.width = '0%';
-          track.classList.remove('visible');
-          loadAdminList();
-        } else {
-          errorBox.textContent = 'Upload failed. Check the file types and try again.';
-          errorBox.classList.add('visible');
-        }
-      };
-      xhr.onerror = () => {
-        submitBtn.disabled = false;
-        errorBox.textContent = 'Upload failed. Check your connection and try again.';
-        errorBox.classList.add('visible');
-      };
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error('upload_failed')));
+      xhr.onerror = () => reject(new Error('upload_failed'));
       xhr.send(fd);
     });
   }
@@ -153,7 +257,7 @@
   async function loadAdminList() {
     const list = document.getElementById('admin-list-items');
     try {
-      const items = await api('/anime');
+      const items = await api('/anime/admin/all');
       if (!items.length) {
         list.innerHTML = '<p style="color:var(--text-muted); font-size:14px;">Nothing uploaded yet.</p>';
         return;
@@ -162,7 +266,7 @@
         <div class="admin-row">
           <div>
             <div class="row-title">${item.title}</div>
-            <div class="row-meta">${item.genre || 'Anime'}</div>
+            <div class="row-meta">${item.series_title ? `${item.series_title} · Episode ${item.episode_number}` : (item.genre || 'Anime')}</div>
           </div>
           <button class="btn btn-danger" data-delete="${item.id}" style="padding:6px 12px; font-size:13px;">Delete</button>
         </div>

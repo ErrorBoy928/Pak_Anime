@@ -52,6 +52,46 @@
     width: 0%;
     background: var(--accent);
   }
+  .playlist {
+    margin-top: 32px;
+  }
+  .playlist-title {
+    font-size: 15px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .episode-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    transition: border-color var(--transition), background var(--transition);
+  }
+  .episode-row:hover {
+    border-color: var(--border-strong);
+  }
+  .episode-row.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .episode-number {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--text-muted);
+    width: 28px;
+    flex-shrink: 0;
+  }
+  .episode-row.active .episode-number {
+    color: var(--accent);
+  }
+  .episode-title {
+    font-size: 14px;
+    flex: 1;
+  }
 </style>
 </head>
 <body>
@@ -122,7 +162,7 @@
 
     shell.innerHTML = `
       <div class="video-shell">
-        <video id="content-video" controls preload="metadata" src="/api/anime/${currentAnime.id}/stream"></video>
+        <video id="content-video" controls controlsList="nodownload" preload="metadata" src="/api/anime/${currentAnime.id}/stream"></video>
         <div id="ad-container"></div>
       </div>
       <div class="watch-meta">
@@ -144,11 +184,34 @@
           </div>
         </div>
       </div>
+      <div class="playlist" id="playlist-shell"></div>
     `;
 
     wireDownloadButton(!!alreadyDownloaded);
     if (currentUser.isAdmin) wireDeleteButton();
     setupPreRollAd();
+    loadPlaylist();
+  }
+
+  async function loadPlaylist() {
+    const shell = document.getElementById('playlist-shell');
+    let data;
+    try {
+      data = await api(`/anime/${currentAnime.id}/playlist`);
+    } catch (e) {
+      return;
+    }
+    if (!data || !data.episodes || data.episodes.length < 2) return;
+
+    shell.innerHTML = `
+      <div class="playlist-title">${data.series.title} — ${data.episodes.length} episodes</div>
+      ${data.episodes.map((ep) => `
+        <a href="/watch.html?id=${ep.id}" class="episode-row ${ep.id === currentAnime.id ? 'active' : ''}">
+          <span class="episode-number">${ep.episode_number ?? ''}</span>
+          <span class="episode-title">${ep.title}</span>
+        </a>
+      `).join('')}
+    `;
   }
 
   function wireDownloadButton(alreadyDownloaded) {

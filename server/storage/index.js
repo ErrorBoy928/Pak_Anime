@@ -8,6 +8,7 @@ const {
   DeleteObjectCommand,
   HeadObjectCommand,
 } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const R2_CONFIGURED = !!(
   process.env.R2_ACCOUNT_ID &&
@@ -126,4 +127,26 @@ async function objectExists(key) {
   return fs.existsSync(path.join(localRoot, key));
 }
 
-module.exports = { R2_CONFIGURED, newKey, putObjectFromPath, getObjectStream, deleteObject, objectExists };
+// Returns a short-lived URL the browser can PUT a file to directly — the
+// bytes never pass through our own server, which matters because Render's
+// (and most free hosts') proxy silently kills large uploads that route
+// through the app itself. Only meaningful when R2 is configured; local dev
+// keeps using the simple direct-upload path instead.
+async function getPresignedPutUrl(key, contentType) {
+  const cmd = new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET,
+    Key: key,
+    ContentType: contentType,
+  });
+  return getSignedUrl(s3, cmd, { expiresIn: 60 * 30 }); // 30 minutes
+}
+
+module.exports = {
+  R2_CONFIGURED,
+  newKey,
+  putObjectFromPath,
+  getObjectStream,
+  deleteObject,
+  objectExists,
+  getPresignedPutUrl,
+};
