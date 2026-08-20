@@ -338,6 +338,19 @@ router.delete('/:id', requireAdmin, async (req, res, next) => {
     if (row.poster_key) await storage.deleteObject(row.poster_key);
 
     await run('DELETE FROM anime WHERE id = ?', [req.params.id]);
+
+    // If that was the last episode of its series, the series record is now
+    // orphaned — clean it up (including its poster) so re-using the same
+    // series name later starts fresh instead of inheriting stale data.
+    if (row.series_id) {
+      const remaining = await get('SELECT COUNT(*) as count FROM anime WHERE series_id = ?', [row.series_id]);
+      if (!remaining || remaining.count === 0) {
+        const series = await get('SELECT poster_key FROM series WHERE id = ?', [row.series_id]);
+        if (series?.poster_key) await storage.deleteObject(series.poster_key);
+        await run('DELETE FROM series WHERE id = ?', [row.series_id]);
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) {
     next(err);
