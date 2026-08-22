@@ -65,7 +65,7 @@ router.get('/', async (req, res, next) => {
         title: s.title,
         description: s.description,
         genre: s.genre,
-        poster_path: posterUrlFor(s.id, s.poster_key),
+        poster_path: posterUrlFor(s.first_episode_id, s.poster_key),
         created_at: s.created_at,
         episode_count: s.episode_count,
       }));
